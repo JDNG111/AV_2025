@@ -27,18 +27,13 @@
       text-align: center;
     }
     
-    .logo {
-      max-width: 150px;
-      margin-bottom: 20px;
-    }
-    
     h1 {
       color: #1e3a8a;
       margin-bottom: 20px;
     }
     
     .status {
-      padding: 15px;
+      padding: 20px;
       border-radius: 10px;
       margin: 20px 0;
     }
@@ -63,17 +58,25 @@
       height: 3rem;
     }
     
-    .btn-primary {
-      background: #1e3a8a;
-      border: none;
-      padding: 15px 40px;
-      font-size: 1.1rem;
-      border-radius: 50px;
-      margin-top: 20px;
+    .progress-container {
+      margin: 20px 0;
     }
     
-    .btn-primary:hover {
-      background: #3b82f6;
+    .progress {
+      height: 30px;
+      border-radius: 15px;
+    }
+    
+    .progress-bar {
+      font-size: 1rem;
+      font-weight: bold;
+      transition: width 0.3s ease;
+    }
+    
+    .btn-manual {
+      margin-top: 20px;
+      padding: 10px 30px;
+      border-radius: 50px;
     }
   </style>
 </head>
@@ -84,10 +87,17 @@
     
     <div id="status" class="status checking">
       <div class="spinner-border text-warning" role="status">
-        <span class="visually-hidden">Verificando...</span>
+        <span class="visually-hidden">Cargando...</span>
       </div>
-      <p class="mt-3 mb-0"><strong>Verificando disponibilidad del sistema...</strong></p>
-      <small>Por favor espera unos segundos</small>
+      <p class="mt-3 mb-2"><strong>Cargando sistema de votación...</strong></p>
+      <small id="statusText">Iniciando verificación inteligente</small>
+      
+      <div class="progress-container mt-3">
+        <div class="progress">
+          <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning" 
+               role="progressbar" style="width: 0%">0%</div>
+        </div>
+      </div>
     </div>
     
     <div id="content"></div>
@@ -99,106 +109,147 @@
     // ============================================
     
     const CONFIG = {
-      // URL de tu Apps Script (la que ya tienes)
+      // URL de tu Apps Script
       appsScriptUrl: 'https://script.google.com/macros/s/AKfycbzzL6DaM1V7yoV5KxPfiRm3kVN7Nzo4IVblb5XeVHSrHViHQBTgLNhfBP_MgCxNBT6Z/exec',
       
       // URL de tu Google Form de respaldo
       googleFormUrl: 'https://docs.google.com/forms/d/e/1FAIpQLSdMzilyl8s3Uep61Atp8xEYdky1mFtKqps6E-x-MzyD13CKsg/viewform?usp=dialog',
       
-      // Timeout en milisegundos (5 segundos)
-      timeout: 5000,
+      // Timeout máximo para cargar (8 segundos)
+      maxTimeout: 8000,
       
-      // Intentos antes de considerar caído
-      maxRetries: 2
+      // Mostrar opción manual después de X segundos
+      showManualOptionAfter: 10000
     };
     
     // ============================================
-    // LÓGICA DE DETECCIÓN AUTOMÁTICA
+    // DETECCIÓN INTELIGENTE SIN CONSUMIR CUOTA
     // ============================================
     
-    let retryCount = 0;
+    let startTime;
+    let progressInterval;
+    let manualOptionTimeout;
     
     window.onload = function() {
-      console.log('Iniciando verificación del sistema...');
-      verificarDisponibilidad();
+      console.log('🚀 Iniciando carga del sistema...');
+      startTime = Date.now();
+      
+      // Iniciar barra de progreso
+      startProgressBar();
+      
+      // Intentar cargar Apps Script directamente en un iframe oculto
+      cargarAppsScriptDirecto();
+      
+      // Fallback: Mostrar opción manual después de 10 segundos
+      manualOptionTimeout = setTimeout(mostrarOpcionManual, CONFIG.showManualOptionAfter);
     };
     
-    function verificarDisponibilidad() {
-      const startTime = Date.now();
+    function startProgressBar() {
+      let progress = 0;
+      const progressBar = document.getElementById('progressBar');
+      const statusText = document.getElementById('statusText');
       
-      // Crear una petición con timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), CONFIG.timeout);
-      
-      fetch(CONFIG.appsScriptUrl, {
-        method: 'GET',
-        signal: controller.signal,
-        mode: 'no-cors' // Importante para Apps Script
-      })
-      .then(response => {
-        clearTimeout(timeoutId);
-        const loadTime = Date.now() - startTime;
+      progressInterval = setInterval(function() {
+        progress += 2;
         
-        console.log('Apps Script respondió en ' + loadTime + 'ms');
-        
-        // Si responde en menos de 5 segundos, asumimos que funciona
-        if (loadTime < CONFIG.timeout) {
-          mostrarExito();
-          redirigirAAppsScript();
-        } else {
-          intentarNuevamente();
+        if (progress <= 100) {
+          progressBar.style.width = progress + '%';
+          progressBar.textContent = progress + '%';
+          
+          // Actualizar texto según progreso
+          if (progress < 30) {
+            statusText.textContent = 'Conectando con el sistema...';
+          } else if (progress < 60) {
+            statusText.textContent = 'Verificando disponibilidad...';
+          } else if (progress < 90) {
+            statusText.textContent = 'Preparando interfaz de votación...';
+          } else {
+            statusText.textContent = 'Casi listo...';
+          }
         }
-      })
-      .catch(error => {
-        clearTimeout(timeoutId);
-        console.error('Error al verificar Apps Script:', error);
-        
-        if (error.name === 'AbortError') {
-          console.log('Timeout: Apps Script no respondió a tiempo');
-        }
-        
-        intentarNuevamente();
-      });
+      }, 150);
     }
     
-    function intentarNuevamente() {
-      retryCount++;
-      
-      if (retryCount < CONFIG.maxRetries) {
-        console.log('Intento ' + (retryCount + 1) + ' de ' + CONFIG.maxRetries);
-        document.getElementById('status').innerHTML = 
-          '<div class="spinner-border text-warning"></div>' +
-          '<p class="mt-3 mb-0"><strong>Verificando nuevamente...</strong></p>' +
-          '<small>Intento ' + (retryCount + 1) + ' de ' + CONFIG.maxRetries + '</small>';
-        
-        setTimeout(verificarDisponibilidad, 2000);
-      } else {
-        mostrarError();
-        redirigirAGoogleForm();
+    function stopProgressBar() {
+      if (progressInterval) {
+        clearInterval(progressInterval);
+      }
+      if (manualOptionTimeout) {
+        clearTimeout(manualOptionTimeout);
       }
     }
     
-    function mostrarExito() {
-      document.getElementById('status').className = 'status online';
-      document.getElementById('status').innerHTML = 
-        '<i class="bi bi-check-circle-fill" style="font-size: 3rem; color: #28a745;"></i>' +
-        '<p class="mt-3 mb-0"><strong>Sistema en línea</strong></p>' +
-        '<small>Redirigiendo al sistema de votación...</small>';
+    function cargarAppsScriptDirecto() {
+      // Crear iframe oculto para cargar Apps Script
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = CONFIG.appsScriptUrl;
+      
+      // Timer para detectar si carga
+      const loadTimeout = setTimeout(function() {
+        // Si después de 8 segundos no cargó, usar Form
+        console.log('⚠️ Timeout: Apps Script no cargó a tiempo');
+        detectarFallo();
+      }, CONFIG.maxTimeout);
+      
+      // Si el iframe carga exitosamente
+      iframe.onload = function() {
+        clearTimeout(loadTimeout);
+        const loadTime = Date.now() - startTime;
+        console.log('✅ Apps Script cargó en ' + loadTime + 'ms');
+        
+        // Si cargó rápido, está funcionando bien
+        if (loadTime < CONFIG.maxTimeout) {
+          detectarExito();
+        } else {
+          detectarFallo();
+        }
+      };
+      
+      // Si hay error al cargar
+      iframe.onerror = function() {
+        clearTimeout(loadTimeout);
+        console.log('❌ Error al cargar Apps Script');
+        detectarFallo();
+      };
+      
+      // Agregar iframe al DOM
+      document.body.appendChild(iframe);
     }
     
-    function mostrarError() {
+    function detectarExito() {
+      stopProgressBar();
+      
+      document.getElementById('status').className = 'status online';
+      document.getElementById('status').innerHTML = 
+        '<i class="bi bi-check-circle-fill" style="font-size: 4rem; color: #28a745;"></i>' +
+        '<h4 class="mt-3 mb-2">Sistema Disponible</h4>' +
+        '<p class="mb-0">Redirigiendo al sistema de votación...</p>';
+      
+      // Redirigir inmediatamente
+      setTimeout(function() {
+        console.log('➡️ Redirigiendo a Apps Script');
+        window.location.replace(CONFIG.appsScriptUrl);
+      }, 1000);
+    }
+    
+    function detectarFallo() {
+      stopProgressBar();
+      
       document.getElementById('status').className = 'status offline';
       document.getElementById('status').innerHTML = 
-        '<i class="bi bi-exclamation-triangle-fill" style="font-size: 3rem; color: #dc3545;"></i>' +
-        '<p class="mt-3 mb-0"><strong>Sistema en mantenimiento</strong></p>' +
-        '<small>Usando sistema de respaldo...</small>';
+        '<i class="bi bi-exclamation-triangle-fill" style="font-size: 4rem; color: #dc3545;"></i>' +
+        '<h4 class="mt-3 mb-2">Sistema en Mantenimiento</h4>' +
+        '<p class="mb-2">Usando sistema de respaldo automático</p>' +
+        '<small class="text-muted">Tu voto se registrará correctamente</small>';
       
       document.getElementById('content').innerHTML = 
-        '<div class="alert alert-info">' +
-          '<i class="bi bi-info-circle"></i> No te preocupes, tu voto se registrará correctamente en el sistema de respaldo.' +
+        '<div class="alert alert-info mt-3">' +
+          '<i class="bi bi-info-circle"></i> No te preocupes, el sistema de respaldo es igual de seguro y confiable.' +
         '</div>' +
-        '<p class="text-muted">Redirigiendo en <span id="countdown">3</span> segundos...</p>';
+        '<p class="text-muted">Redirigiendo en <strong><span id="countdown">3</span></strong> segundos...</p>';
       
+      // Countdown
       let countdown = 3;
       const interval = setInterval(function() {
         countdown--;
@@ -209,27 +260,50 @@
         
         if (countdown <= 0) {
           clearInterval(interval);
+          redirigirAGoogleForm();
         }
       }, 1000);
     }
     
-    function redirigirAAppsScript() {
-      setTimeout(function() {
-        console.log('Redirigiendo a Apps Script...');
-        window.location.href = CONFIG.appsScriptUrl;
-      }, 1500);
+    function mostrarOpcionManual() {
+      // Si después de 10 segundos no detectó nada, dar opción manual
+      console.log('⏱️ Mostrando opción manual');
+      
+      stopProgressBar();
+      
+      document.getElementById('status').className = 'status checking';
+      document.getElementById('status').innerHTML = 
+        '<i class="bi bi-hourglass-split" style="font-size: 4rem; color: #856404;"></i>' +
+        '<h4 class="mt-3 mb-2">La conexión está tomando más tiempo de lo normal</h4>' +
+        '<p class="mb-0">Puedes esperar o usar el sistema de respaldo</p>';
+      
+      document.getElementById('content').innerHTML = 
+        '<div class="d-grid gap-2 mt-4">' +
+          '<button onclick="forzarAppsScript()" class="btn btn-primary btn-manual">' +
+            '<i class="bi bi-arrow-clockwise"></i> Esperar y Continuar' +
+          '</button>' +
+          '<button onclick="forzarGoogleForm()" class="btn btn-outline-primary btn-manual">' +
+            '<i class="bi bi-lightning-fill"></i> Usar Sistema de Respaldo Ahora' +
+          '</button>' +
+        '</div>' +
+        '<p class="text-muted mt-3" style="font-size: 0.9rem;">' +
+          '<i class="bi bi-shield-check"></i> Ambas opciones son seguras y registran tu voto correctamente' +
+        '</p>';
+    }
+    
+    function forzarAppsScript() {
+      console.log('👤 Usuario eligió Apps Script manualmente');
+      window.location.replace(CONFIG.appsScriptUrl);
+    }
+    
+    function forzarGoogleForm() {
+      console.log('👤 Usuario eligió Google Form manualmente');
+      redirigirAGoogleForm();
     }
     
     function redirigirAGoogleForm() {
-      setTimeout(function() {
-        console.log('Redirigiendo a Google Form...');
-        window.location.href = CONFIG.googleFormUrl;
-      }, 3000);
-    }
-    
-    // Función manual para forzar Google Form (opcional)
-    function usarFormulario() {
-      window.location.href = CONFIG.googleFormUrl;
+      console.log('➡️ Redirigiendo a Google Form');
+      window.location.replace(CONFIG.googleFormUrl);
     }
   </script>
 </body>
